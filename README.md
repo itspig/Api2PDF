@@ -9,7 +9,9 @@
 - Filters duplicate URLs, fragments, static assets, auth/search/tag pages, and optional include/exclude patterns.
 - Extracts readable documentation text using common docs selectors, `trafilatura`, then cleaned body text.
 - The packaged `.exe` uses a stdlib HTML text extractor fallback for better PyInstaller reliability.
-- Generates a structured PDF with title page, clickable contents list, per-page PDF bookmarks (with nested headings), dark-theme code blocks with a language ribbon, and tables.
+- Generates a structured PDF with title page, clickable contents list, per-page PDF bookmarks (with nested headings), dark-theme code blocks with a language ribbon, tables, and inline images downloaded from the source pages.
+- Cleans up cross-page boilerplate automatically (shared site-name suffix in titles, repeated nav/footer/copyright/risk-disclosure blocks across the majority of pages).
+- Use `--add-column-title` to prepend an inferred section path (e.g. `1. 1.1 Intro`) to each page title; use `--no-images` to skip image downloads.
 
 ## Install for development
 
