@@ -1,13 +1,19 @@
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import re
 import sys
 from html.parser import HTMLParser
 from collections import deque
-from urllib.parse import urljoin
 
 from app.config.models import ExportConfig
 from app.core.errors import ExtractionError, NoValidPageError
-from app.document.models import ExtractedPage
+from app.document.models import (
+    Block,
+    CodeBlock,
+    ExtractedPage,
+    HeadingBlock,
+    ParagraphBlock,
+    TableBlock,
+)
 from app.utils.file_utils import resolve_output_path
 
 
@@ -23,63 +29,180 @@ def create_client(timeout: int):
     return create_http_client(timeout)
 
 
-class _PlainTextExtractor(HTMLParser):
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+_PARAGRAPH_TAGS = {"p", "li", "blockquote", "dt", "dd"}
+_SKIP_TAGS = {"script", "style", "nav", "footer", "aside", "noscript", "svg", "form", "header"}
+
+
+class _StructuredExtractor(HTMLParser):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(convert_charrefs=True)
         self.title = ""
-        self.headings: list[str] = []
-        self._skip_depth = 0
-        self._current_tag = ""
-        self._buffer: list[str] = []
+        self.blocks: list[Block] = []
         self._title_buffer: list[str] = []
-        self._heading_buffer: list[str] = []
+        self._in_title = False
+        self._skip_depth = 0
+
+        self._heading_stack: list[tuple[int, list[str]]] = []
+        self._paragraph_stack: list[list[str]] = []
+        self._pre_stack: list[list[str]] = []
+        self._pre_language: str = ""
+
+        self._table_stack: list[list[list[str]]] = []
+        self._row_stack: list[list[str]] = []
+        self._cell_stack: list[list[str]] = []
+
+    def _attr_class(self, attrs: list[tuple[str, str | None]]) -> str:
+        for key, value in attrs:
+            if key.lower() == "class" and value:
+                return value
+        return ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         lower = tag.lower()
-        self._current_tag = lower
-        if lower in {"script", "style", "nav", "footer", "aside", "noscript", "svg"}:
+        if lower == "title":
+            self._in_title = True
+            return
+        if lower in _SKIP_TAGS:
             self._skip_depth += 1
-        if lower in {"p", "div", "br", "li", "h1", "h2", "h3", "tr"}:
-            self._buffer.append("\n")
+            return
+        if self._skip_depth:
+            return
+
+        if lower in _HEADING_TAGS:
+            self._heading_stack.append((int(lower[1]), []))
+            return
+        if lower == "pre":
+            self._pre_stack.append([])
+            self._pre_language = ""
+            return
+        if lower == "code" and self._pre_stack:
+            classes = self._attr_class(attrs).split()
+            for cls in classes:
+                if cls.startswith("language-"):
+                    self._pre_language = cls[len("language-") :]
+                    break
+            return
+        if lower == "table":
+            self._table_stack.append([])
+            return
+        if lower == "tr" and self._table_stack:
+            self._row_stack.append([])
+            return
+        if lower in {"th", "td"} and self._row_stack:
+            self._cell_stack.append([])
+            return
+        if lower in _PARAGRAPH_TAGS:
+            self._paragraph_stack.append([])
+            return
+        if lower == "br":
+            if self._pre_stack:
+                self._pre_stack[-1].append("\n")
+            elif self._cell_stack:
+                self._cell_stack[-1].append(" ")
+            elif self._paragraph_stack:
+                self._paragraph_stack[-1].append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         lower = tag.lower()
-        if lower in {"script", "style", "nav", "footer", "aside", "noscript", "svg"} and self._skip_depth:
-            self._skip_depth -= 1
-        if lower == "title" and not self.title:
+        if lower == "title":
             self.title = " ".join("".join(self._title_buffer).split())
             self._title_buffer = []
-        if lower in {"h1", "h2", "h3"}:
-            heading = " ".join("".join(self._heading_buffer).split())
-            if heading:
-                self.headings.append(heading)
-                if not self.title:
-                    self.title = heading
-            self._heading_buffer = []
-        self._current_tag = ""
-
-    def handle_data(self, data: str) -> None:
+            self._in_title = False
+            return
+        if lower in _SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
         if self._skip_depth:
             return
-        if self._current_tag == "title":
-            self._title_buffer.append(data)
-        if self._current_tag in {"h1", "h2", "h3"}:
-            self._heading_buffer.append(data)
-        self._buffer.append(data)
 
-    def text(self) -> str:
-        raw = "".join(self._buffer)
-        lines = [re.sub(r"\s+", " ", line).strip() for line in raw.splitlines()]
-        return "\n".join(line for line in lines if line)
+        if lower in _HEADING_TAGS and self._heading_stack:
+            level, parts = self._heading_stack.pop()
+            text = " ".join("".join(parts).split())
+            if text:
+                self.blocks.append(HeadingBlock(kind="heading", level=level, text=text))
+            return
+        if lower == "pre" and self._pre_stack:
+            parts = self._pre_stack.pop()
+            text = "".join(parts).strip("\n")
+            if text.strip():
+                self.blocks.append(CodeBlock(kind="code", text=text, language=self._pre_language))
+            self._pre_language = ""
+            return
+        if lower == "table" and self._table_stack:
+            rows = self._table_stack.pop()
+            if rows:
+                self.blocks.append(TableBlock(kind="table", rows=rows))
+            return
+        if lower == "tr" and self._row_stack:
+            row = self._row_stack.pop()
+            if row and self._table_stack:
+                self._table_stack[-1].append(row)
+            return
+        if lower in {"th", "td"} and self._cell_stack:
+            cell_text = " ".join("".join(self._cell_stack.pop()).split())
+            if self._row_stack:
+                self._row_stack[-1].append(cell_text)
+            return
+        if lower in _PARAGRAPH_TAGS and self._paragraph_stack:
+            parts = self._paragraph_stack.pop()
+            text = " ".join("".join(parts).split())
+            if text:
+                self.blocks.append(ParagraphBlock(kind="paragraph", text=text))
+            return
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self._title_buffer.append(data)
+            return
+        if self._skip_depth:
+            return
+        if self._pre_stack:
+            self._pre_stack[-1].append(data)
+            return
+        if self._cell_stack:
+            self._cell_stack[-1].append(data)
+            return
+        if self._heading_stack:
+            self._heading_stack[-1][1].append(data)
+            return
+        if self._paragraph_stack:
+            self._paragraph_stack[-1].append(data)
+
+
+def _flatten_blocks(blocks: list[Block]) -> tuple[str, list[str]]:
+    text_parts: list[str] = []
+    headings: list[str] = []
+    for block in blocks:
+        if block.kind == "heading":
+            headings.append(block.text)
+            text_parts.append(block.text)
+        elif block.kind == "paragraph":
+            text_parts.append(block.text)
+        elif block.kind == "code":
+            text_parts.append(block.text)
+        elif block.kind == "table":
+            for row in block.rows:
+                text_parts.append(" | ".join(row))
+    return "\n".join(text_parts), headings
 
 
 def _extract_page_stdlib(url: str, html: str) -> ExtractedPage:
-    parser = _PlainTextExtractor()
+    parser = _StructuredExtractor()
     parser.feed(html)
-    text = parser.text()
+    blocks = parser.blocks
+    text, headings = _flatten_blocks(blocks)
     title = parser.title or url
-    headings = parser.headings or [title]
-    return ExtractedPage(url=url, title=title, headings=headings, text=text, word_count=len(text.split()))
+    if not headings:
+        headings = [title] if title else []
+    return ExtractedPage(
+        url=url,
+        title=title,
+        headings=headings,
+        text=text,
+        word_count=len(text.split()),
+        blocks=blocks,
+    )
 
 
 class _StdlibLinkExtractor(HTMLParser):
