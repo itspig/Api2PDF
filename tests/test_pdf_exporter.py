@@ -29,12 +29,12 @@ def _build_document() -> CompiledDocument:
         text="API Intro\nAuthentication\nUse API keys.",
         word_count=5,
         blocks=[
-            HeadingBlock(kind="heading", level=1, text="API Intro"),
-            ParagraphBlock(kind="paragraph", text="This is an introduction to the API."),
-            HeadingBlock(kind="heading", level=2, text="Authentication"),
-            ParagraphBlock(kind="paragraph", text="Use API keys with HMAC signing."),
-            CodeBlock(kind="code", text='print("hello")', language="python"),
-            TableBlock(kind="table", rows=[["Method", "Path"], ["GET", "/orders"]]),
+            HeadingBlock(level=1, text="API Intro"),
+            ParagraphBlock(text="This is an introduction to the API."),
+            HeadingBlock(level=2, text="Authentication"),
+            ParagraphBlock(text="Use API keys with HMAC signing."),
+            CodeBlock(text='print("hello")', language="python"),
+            TableBlock(rows=[["Method", "Path"], ["GET", "/orders"]]),
         ],
     )
     return CompiledDocument(
@@ -89,7 +89,6 @@ def test_build_code_flowable_includes_language_strip_when_known() -> None:
     code_style = ParagraphStyle("ApiCodeTest", parent=styles["Code"], fontName="Courier")
     code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
     block = CodeBlock(
-        kind="code",
         text="def on_data(datas):\n    for stock_code in datas:\n        print(stock_code, datas[stock_code])",
         language="python",
     )
@@ -120,7 +119,6 @@ def test_build_code_flowable_drops_language_strip_when_unknown() -> None:
     code_style = ParagraphStyle("ApiCodeTest", parent=styles["Code"], fontName="Courier")
     code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
     block = CodeBlock(
-        kind="code",
         text="some plain code",
         language="",
     )
@@ -149,7 +147,7 @@ def test_dark_code_block_paints_full_background(tmp_path: Path) -> None:
         fontName="Courier",
         textColor=CODE_BACKGROUND,
     )
-    block = CodeBlock(kind="code", text="line one\nline two", language="python")
+    block = CodeBlock(text="line one\nline two", language="python")
     code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
     doc = SimpleDocTemplate(str(output), pagesize=A4)
     story = list(
@@ -178,9 +176,8 @@ def test_export_pdf_code_block_renders(tmp_path: Path) -> None:
         text="def on_data(datas):\n    print(datas)",
         word_count=5,
         blocks=[
-            HeadingBlock(kind="heading", level=1, text="Code Sample"),
+            HeadingBlock(level=1, text="Code Sample"),
             CodeBlock(
-                kind="code",
                 text="def on_data(datas):\n    for stock_code in datas:\n        print(stock_code, datas[stock_code])",
                 language="python",
             ),

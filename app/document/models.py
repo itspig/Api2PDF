@@ -7,39 +7,39 @@ BlockKind = Literal["heading", "paragraph", "code", "table", "image"]
 
 @dataclass(slots=True)
 class HeadingBlock:
-    kind: Literal["heading"]
     level: int
     text: str
+    kind: Literal["heading"] = field(default="heading", init=False)
 
 
 @dataclass(slots=True)
 class ParagraphBlock:
-    kind: Literal["paragraph"]
     text: str
+    kind: Literal["paragraph"] = field(default="paragraph", init=False)
 
 
 @dataclass(slots=True)
 class CodeBlock:
-    kind: Literal["code"]
     text: str
     language: str = ""
+    kind: Literal["code"] = field(default="code", init=False)
 
 
 @dataclass(slots=True)
 class TableBlock:
-    kind: Literal["table"]
     rows: list[list[str]]
+    kind: Literal["table"] = field(default="table", init=False)
 
 
 @dataclass(slots=True)
 class ImageBlock:
-    kind: Literal["image"]
     src: str
     alt: str = ""
     # Filled by the pipeline once the image is downloaded; the exporter uses
     # this byte payload directly so renderers don't need to do I/O.
     data: bytes | None = None
     mime_type: str = ""
+    kind: Literal["image"] = field(default="image", init=False)
 
 
 Block = HeadingBlock | ParagraphBlock | CodeBlock | TableBlock | ImageBlock

@@ -51,10 +51,9 @@ def test_export_pdf_renders_image_block(tmp_path: Path) -> None:
         text="Demo image",
         word_count=2,
         blocks=[
-            HeadingBlock(kind="heading", level=1, text="Demo"),
-            ParagraphBlock(kind="paragraph", text="Diagram below."),
+            HeadingBlock(level=1, text="Demo"),
+            ParagraphBlock(text="Diagram below."),
             ImageBlock(
-                kind="image",
                 src="https://example.com/assets/diagram.png",
                 alt="Diagram",
                 data=_png_bytes(),

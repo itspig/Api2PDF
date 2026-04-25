@@ -87,7 +87,7 @@ def _walk_blocks(root, *, base_url: str) -> list[Block]:
     def emit_paragraph(text: str) -> None:
         cleaned = _normalize_text(text)
         if cleaned:
-            blocks.append(ParagraphBlock(kind="paragraph", text=cleaned))
+            blocks.append(ParagraphBlock(text=cleaned))
 
     for descendant in root.descendants:
         if not isinstance(descendant, Tag):
@@ -108,7 +108,7 @@ def _walk_blocks(root, *, base_url: str) -> list[Block]:
         if name in HEADING_TAGS:
             text = _normalize_text(descendant.get_text(" ", strip=True))
             if text:
-                blocks.append(HeadingBlock(kind="heading", level=int(name[1]), text=text))
+                blocks.append(HeadingBlock(level=int(name[1]), text=text))
             continue
 
         if name == "pre":
@@ -124,13 +124,13 @@ def _walk_blocks(root, *, base_url: str) -> list[Block]:
                         language = cls[len("language-") :]
                         break
             if code_text.strip():
-                blocks.append(CodeBlock(kind="code", text=code_text, language=language))
+                blocks.append(CodeBlock(text=code_text, language=language))
             continue
 
         if name == "table":
             rows = _table_rows(descendant)
             if rows:
-                blocks.append(TableBlock(kind="table", rows=rows))
+                blocks.append(TableBlock(rows=rows))
             continue
 
         if name == "img":
@@ -145,7 +145,7 @@ def _walk_blocks(root, *, base_url: str) -> list[Block]:
                 if resolved.lower().endswith(".svg"):
                     continue  # skip SVG decorative icons we can't render
                 alt = descendant.get("alt") or ""
-                blocks.append(ImageBlock(kind="image", src=resolved, alt=alt))
+                blocks.append(ImageBlock(src=resolved, alt=alt))
             continue
 
         if name in BLOCK_LEVEL_TAGS:
@@ -160,7 +160,7 @@ def _walk_blocks(root, *, base_url: str) -> list[Block]:
         for line in text.splitlines():
             cleaned = _normalize_text(line)
             if cleaned:
-                blocks.append(ParagraphBlock(kind="paragraph", text=cleaned))
+                blocks.append(ParagraphBlock(text=cleaned))
     return blocks
 
 
@@ -178,6 +178,13 @@ def _flatten_blocks(blocks: list[Block]) -> tuple[str, list[str]]:
         elif block.kind == "table":
             for row in block.rows:
                 text_parts.append(" | ".join(row))
+        elif block.kind == "image":
+            # Include alt text so image-only pages aren't discarded by the
+            # downstream "page.text.strip() empty?" filter.
+            if block.alt:
+                text_parts.append(f"[image: {block.alt}]")
+            else:
+                text_parts.append(f"[image: {block.src}]")
     return "\n".join(text_parts), headings
 
 

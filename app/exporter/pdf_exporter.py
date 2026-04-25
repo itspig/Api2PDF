@@ -65,13 +65,22 @@ MONO_FONT_CANDIDATES = [
 ]
 
 
+_UNICODE_FONT_NAME = "Api2PdfUnicode"
+_MONO_FONT_NAME = "Api2PdfMono"
+
+
 def _register_unicode_font() -> str:
+    # ReportLab raises ``ValueError("font already registered")`` if the same
+    # name is registered twice, so a long-running process exporting many PDFs
+    # would silently fall back to Helvetica on every call after the first.
+    # Detect a previous successful registration and return early.
+    if _UNICODE_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return _UNICODE_FONT_NAME
     for font_path in FONT_CANDIDATES:
         if font_path.exists():
-            font_name = "Api2PdfUnicode"
             try:
-                pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-                return font_name
+                pdfmetrics.registerFont(TTFont(_UNICODE_FONT_NAME, str(font_path)))
+                return _UNICODE_FONT_NAME
             except Exception:
                 continue
     return "Helvetica"
@@ -94,20 +103,21 @@ def _font_supports_cjk(font_path: Path) -> bool:
 def _register_mono_font(unicode_font_fallback: str) -> str:
     """Register a code font that can render both ASCII and CJK glyphs.
 
-    We try our preferred mono fonts first, but a candidate is only accepted if
-    it actually supports CJK. Otherwise we fall back to the already-registered
-    Unicode body font so Chinese characters never silently disappear from code.
+    Idempotent: returns the already-registered font name on subsequent calls
+    so repeated ``export_pdf`` invocations in the same process don't silently
+    fall back to a non-CJK font.
     """
 
+    if _MONO_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return _MONO_FONT_NAME
     for font_path in MONO_FONT_CANDIDATES:
         if not font_path.exists():
             continue
         if not _font_supports_cjk(font_path):
             continue
-        font_name = "Api2PdfMono"
         try:
-            pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-            return font_name
+            pdfmetrics.registerFont(TTFont(_MONO_FONT_NAME, str(font_path)))
+            return _MONO_FONT_NAME
         except Exception:
             continue
     return unicode_font_fallback
@@ -660,5 +670,5 @@ def _fallback_blocks_from_text(page: ExtractedPage) -> list[Block]:
     for line in page.text.splitlines():
         cleaned = line.strip()
         if cleaned:
-            blocks.append(ParagraphBlock(kind="paragraph", text=cleaned))
+            blocks.append(ParagraphBlock(text=cleaned))
     return blocks

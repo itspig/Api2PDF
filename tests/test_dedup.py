@@ -14,13 +14,13 @@ def _page(blocks):
 
 
 def test_dedup_removes_blocks_present_on_majority_of_pages() -> None:
-    nav = ParagraphBlock(kind="paragraph", text="Home | Docs | Forum")
-    risk = ParagraphBlock(kind="paragraph", text="Investment carries risk; please be cautious.")
+    nav = ParagraphBlock(text="Home | Docs | Forum")
+    risk = ParagraphBlock(text="Investment carries risk; please be cautious.")
     pages = [
-        _page([nav, ParagraphBlock(kind="paragraph", text="Page 1 unique content"), risk]),
-        _page([nav, ParagraphBlock(kind="paragraph", text="Page 2 unique content"), risk]),
-        _page([nav, ParagraphBlock(kind="paragraph", text="Page 3 unique content"), risk]),
-        _page([nav, ParagraphBlock(kind="paragraph", text="Page 4 unique content"), risk]),
+        _page([nav, ParagraphBlock(text="Page 1 unique content"), risk]),
+        _page([nav, ParagraphBlock(text="Page 2 unique content"), risk]),
+        _page([nav, ParagraphBlock(text="Page 3 unique content"), risk]),
+        _page([nav, ParagraphBlock(text="Page 4 unique content"), risk]),
     ]
     removed = deduplicate_repeating_blocks(pages)
     assert removed == 8  # nav + risk dropped from each of 4 pages
@@ -33,7 +33,7 @@ def test_dedup_removes_blocks_present_on_majority_of_pages() -> None:
 
 def test_dedup_keeps_unique_blocks() -> None:
     pages = [
-        _page([ParagraphBlock(kind="paragraph", text=f"Body {i}") for i in range(3)])
+        _page([ParagraphBlock(text=f"Body {i}") for i in range(3)])
         for _ in range(4)
     ]
     removed = deduplicate_repeating_blocks(pages)
@@ -44,7 +44,7 @@ def test_dedup_keeps_unique_blocks() -> None:
 
 
 def test_dedup_skips_when_corpus_too_small() -> None:
-    nav = ParagraphBlock(kind="paragraph", text="Home")
+    nav = ParagraphBlock(text="Home")
     pages = [_page([nav]), _page([nav])]
     assert deduplicate_repeating_blocks(pages) == 0
     assert pages[0].blocks and pages[1].blocks

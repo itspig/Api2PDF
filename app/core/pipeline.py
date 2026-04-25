@@ -112,7 +112,7 @@ class _StructuredExtractor(HTMLParser):
             if resolved.lower().endswith(".svg"):
                 return
             alt = self._attr(attrs, "alt")
-            self.blocks.append(ImageBlock(kind="image", src=resolved, alt=alt))
+            self.blocks.append(ImageBlock(src=resolved, alt=alt))
             return
         if lower in _PARAGRAPH_TAGS:
             self._paragraph_stack.append([])
@@ -142,19 +142,19 @@ class _StructuredExtractor(HTMLParser):
             level, parts = self._heading_stack.pop()
             text = " ".join("".join(parts).split())
             if text:
-                self.blocks.append(HeadingBlock(kind="heading", level=level, text=text))
+                self.blocks.append(HeadingBlock(level=level, text=text))
             return
         if lower == "pre" and self._pre_stack:
             parts = self._pre_stack.pop()
             text = "".join(parts).strip("\n")
             if text.strip():
-                self.blocks.append(CodeBlock(kind="code", text=text, language=self._pre_language))
+                self.blocks.append(CodeBlock(text=text, language=self._pre_language))
             self._pre_language = ""
             return
         if lower == "table" and self._table_stack:
             rows = self._table_stack.pop()
             if rows:
-                self.blocks.append(TableBlock(kind="table", rows=rows))
+                self.blocks.append(TableBlock(rows=rows))
             return
         if lower == "tr" and self._row_stack:
             row = self._row_stack.pop()
@@ -170,7 +170,7 @@ class _StructuredExtractor(HTMLParser):
             parts = self._paragraph_stack.pop()
             text = " ".join("".join(parts).split())
             if text:
-                self.blocks.append(ParagraphBlock(kind="paragraph", text=text))
+                self.blocks.append(ParagraphBlock(text=text))
             return
 
     def handle_data(self, data: str) -> None:
