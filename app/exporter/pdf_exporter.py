@@ -46,7 +46,17 @@ FONT_CANDIDATES = [
     Path("C:/Windows/Fonts/msyh.ttc"),
     Path("C:/Windows/Fonts/simsun.ttc"),
 ]
+# Code-friendly monospace fonts. We prefer CJK-aware monospace faces because
+# api2pdf is frequently used on Chinese documentation; ASCII-only mono fonts
+# (Consolas/Courier) drop Chinese glyphs inside <pre>/<code> blocks. The
+# CJK-capable body fonts at the bottom keep code listings readable even when
+# no monospaced CJK font is installed - glyphs render correctly, slightly less
+# crisp than a true monospace.
 MONO_FONT_CANDIDATES = [
+    FONT_DIR / "SarasaMono-Regular.ttf",
+    Path("C:/Windows/Fonts/sarasa-mono-sc-regular.ttf"),
+    Path("C:/Windows/Fonts/CascadiaMono.ttf"),
+    Path("C:/Windows/Fonts/CascadiaCode.ttf"),
     Path("C:/Windows/Fonts/consola.ttf"),
     Path("C:/Windows/Fonts/cour.ttf"),
 ]
@@ -64,16 +74,40 @@ def _register_unicode_font() -> str:
     return "Helvetica"
 
 
-def _register_mono_font() -> str:
+def _font_supports_cjk(font_path: Path) -> bool:
+    """Quick heuristic: does this font cover the Basic CJK block?"""
+
+    try:
+        from reportlab.pdfbase.ttfonts import TTFontFile
+
+        ttf = TTFontFile(str(font_path))
+        cmap = getattr(ttf, "charToGlyph", {}) or {}
+        # Cover at least a couple of common CJK codepoints (中 文)
+        return all(ord(ch) in cmap for ch in "\u4e2d\u6587")
+    except Exception:
+        return False
+
+
+def _register_mono_font(unicode_font_fallback: str) -> str:
+    """Register a code font that can render both ASCII and CJK glyphs.
+
+    We try our preferred mono fonts first, but a candidate is only accepted if
+    it actually supports CJK. Otherwise we fall back to the already-registered
+    Unicode body font so Chinese characters never silently disappear from code.
+    """
+
     for font_path in MONO_FONT_CANDIDATES:
-        if font_path.exists():
-            font_name = "Api2PdfMono"
-            try:
-                pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-                return font_name
-            except Exception:
-                continue
-    return "Courier"
+        if not font_path.exists():
+            continue
+        if not _font_supports_cjk(font_path):
+            continue
+        font_name = "Api2PdfMono"
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+            return font_name
+        except Exception:
+            continue
+    return unicode_font_fallback
 
 
 def _page_footer(canvas, doc) -> None:
@@ -320,26 +354,37 @@ def _build_table_flowable(block: TableBlock, doc_width: float, body_style: Parag
 class _OutlineLevelTracker:
     """Translate HTML heading levels into safe sequential PDF outline levels.
 
-    ReportLab requires `addOutlineEntry` to never jump down more than one
-    level from the previous entry. We map each HTML heading level to a
-    sequential PDF outline depth that respects this constraint.
+    ReportLab requires ``addOutlineEntry`` to never jump *down* more than one
+    level from the previous entry. We map each HTML heading level to a PDF
+    outline depth that:
+
+    * starts at ``base_level`` for the first heading,
+    * never increases by more than 1 compared to the previously emitted level,
+    * preserves relative hierarchy (a deeper HTML heading produces a deeper
+      outline level than a shallower one within the same scope).
     """
 
     def __init__(self, base_level: int = 1) -> None:
         self.base_level = base_level
-        self._max_seen = base_level - 1
-        self._html_to_outline: dict[int, int] = {}
+        self._stack: list[tuple[int, int]] = []  # (html_level, outline_level)
+        self._last_emitted = base_level - 1
 
     def outline_level(self, html_level: int) -> int:
-        if html_level in self._html_to_outline:
-            return self._html_to_outline[html_level]
-        # Pick the next available outline level, but never jump by more than 1
-        next_level = min(self._max_seen + 1, max(self.base_level, html_level))
-        next_level = max(self.base_level, min(next_level, self._max_seen + 1))
-        self._html_to_outline[html_level] = next_level
-        if next_level > self._max_seen:
-            self._max_seen = next_level
-        return next_level
+        # Pop the stack down to a heading whose html_level is shallower than
+        # the new heading (sibling/uncle relationship).
+        while self._stack and self._stack[-1][0] >= html_level:
+            self._stack.pop()
+        if self._stack:
+            parent_outline = self._stack[-1][1]
+            target = parent_outline + 1
+        else:
+            target = self.base_level
+        # Never jump more than one level deeper than the last entry we emitted.
+        target = min(target, self._last_emitted + 1)
+        target = max(self.base_level, target)
+        self._stack.append((html_level, target))
+        self._last_emitted = target
+        return target
 
 
 def _heading_style_for_level(level: int, heading_styles: dict[int, ParagraphStyle]) -> ParagraphStyle:
@@ -390,7 +435,7 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         body_font = _register_unicode_font()
-        mono_font = _register_mono_font()
+        mono_font = _register_mono_font(body_font)
         styles = getSampleStyleSheet()
 
         title_style = ParagraphStyle(
