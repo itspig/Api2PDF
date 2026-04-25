@@ -24,34 +24,43 @@ from __future__ import annotations
 
 from app.document.models import (
     Block,
-    CodeBlock,
     ExtractedPage,
-    HeadingBlock,
     ParagraphBlock,
-    TableBlock,
 )
 
 
 def _fingerprint(block: Block) -> tuple[str, str] | None:
+    """Return a fingerprint suitable for boilerplate detection.
+
+    We deliberately fingerprint **only paragraphs** because:
+      * Headings repeated across chapters are real content (e.g. "Prerequisites").
+      * Code samples repeated across chapters are real content (e.g. an import line).
+      * Tables repeated across chapters are real content (e.g. a parameter
+        reference embedded in multiple sections).
+
+    Repeated boilerplate that hurts readability is almost always paragraph
+    text (nav text, copyright, risk disclosure, footer rows). Restricting
+    fingerprinting here keeps the dedup pass safe by default.
+    """
+
     if isinstance(block, ParagraphBlock):
         return ("paragraph", " ".join(block.text.split()))
-    if isinstance(block, HeadingBlock):
-        return ("heading", " ".join(block.text.split()))
-    if isinstance(block, CodeBlock):
-        return ("code", block.text.strip())
-    if isinstance(block, TableBlock):
-        flat = "\n".join(" | ".join(row) for row in block.rows)
-        return ("table", flat)
     return None
 
 
 def deduplicate_repeating_blocks(
     pages: list[ExtractedPage],
     *,
-    threshold_ratio: float = 0.5,
+    threshold_ratio: float = 0.6,
     min_pages: int = 3,
 ) -> int:
-    """Remove blocks that appear on a majority of pages.
+    """Remove blocks that appear on a strict majority of pages.
+
+    A block is considered "repeating" only if it shows up on *more than*
+    ``threshold_ratio`` of the pages **and** on at least 3 distinct pages.
+    The ``> threshold`` (rather than ``>=``) bound prevents legitimate
+    cross-references shared by two of three sibling chapters from being
+    silently dropped.
 
     Returns the total number of block instances removed.
     """
@@ -69,8 +78,9 @@ def deduplicate_repeating_blocks(
             seen.add(fp)
             occurrence[fp] = occurrence.get(fp, 0) + 1
 
-    threshold = max(2, int(round(len(pages) * threshold_ratio)))
-    repeating = {fp for fp, count in occurrence.items() if count >= threshold}
+    page_count = len(pages)
+    threshold = max(3, page_count * threshold_ratio)
+    repeating = {fp for fp, count in occurrence.items() if count > threshold}
     if not repeating:
         return 0
 
