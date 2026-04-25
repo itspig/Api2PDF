@@ -10,11 +10,19 @@ def remove_fragment(url: str) -> str:
     return urlunparse(parsed._replace(fragment=""))
 
 
+_DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
 def normalize_url(url: str, base_url: str | None = None) -> str:
     absolute = urljoin(base_url, url) if base_url else url
     parsed = urlparse(remove_fragment(absolute))
     scheme = parsed.scheme.lower() or "https"
     netloc = parsed.netloc.lower()
+    # Strip default port so http://host:80/x and http://host/x deduplicate.
+    if ":" in netloc:
+        host, _, port = netloc.rpartition(":")
+        if host and port and _DEFAULT_PORTS.get(scheme) == port:
+            netloc = host
     path = parsed.path or "/"
     # Preserve trailing slash on directory-style URLs - some hosts hang on the
     # bare path, and the original semantics (directory vs. file) matter.
