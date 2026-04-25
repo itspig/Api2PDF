@@ -54,6 +54,11 @@ def export(
     except (Api2PdfError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
+    except KeyboardInterrupt:
+        # Ctrl+C: print a tidy line instead of a Python traceback. 130 is the
+        # standard SIGINT exit code on POSIX (128 + 2) which CI tools recognise.
+        typer.secho("Aborted by user.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=130) from None
     except Exception as exc:
         typer.secho(f"Unexpected error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc

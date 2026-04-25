@@ -1,11 +1,15 @@
 # Some sites drop or throttle non-browser User-Agents at the TLS/HTTP layer
 # (observed on khsci.com, where our previous UA caused a TLS handshake timeout).
-# We now default to a realistic Chrome on Windows UA so api2pdf works against
-# such hosts out of the box.
+# We default to a realistic Chrome-on-Windows UA, but append an ``api2pdf``
+# token so site operators inspecting their access logs can still recognise
+# our traffic and reach out if needed.
+from app.version import __version__ as _api2pdf_version
+
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/123.0.0.0 Safari/537.36"
+    "Chrome/123.0.0.0 Safari/537.36 "
+    f"api2pdf/{_api2pdf_version}"
 )
 
 HTML_CONTENT_TYPES = (
