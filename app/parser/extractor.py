@@ -1,9 +1,12 @@
+from urllib.parse import urljoin, urlparse
+
 from app.core.constants import DOCUMENT_SELECTORS
 from app.document.models import (
     Block,
     CodeBlock,
     ExtractedPage,
     HeadingBlock,
+    ImageBlock,
     ParagraphBlock,
     TableBlock,
 )
@@ -66,7 +69,16 @@ def _table_rows(table) -> list[list[str]]:
     return rows
 
 
-def _walk_blocks(root) -> list[Block]:
+def _resolve_image_src(value: str, base_url: str) -> str:
+    if not value:
+        return ""
+    value = value.strip()
+    if not value:
+        return ""
+    return urljoin(base_url, value)
+
+
+def _walk_blocks(root, *, base_url: str) -> list[Block]:
     from bs4 import Tag
 
     blocks: list[Block] = []
@@ -121,6 +133,21 @@ def _walk_blocks(root) -> list[Block]:
                 blocks.append(TableBlock(kind="table", rows=rows))
             continue
 
+        if name == "img":
+            src = (
+                descendant.get("src")
+                or descendant.get("data-src")
+                or descendant.get("data-original")
+                or ""
+            )
+            resolved = _resolve_image_src(src, base_url)
+            if resolved and not resolved.lower().startswith("data:"):
+                if resolved.lower().endswith(".svg"):
+                    continue  # skip SVG decorative icons we can't render
+                alt = descendant.get("alt") or ""
+                blocks.append(ImageBlock(kind="image", src=resolved, alt=alt))
+            continue
+
         if name in BLOCK_LEVEL_TAGS:
             text = descendant.get_text(" ", strip=True)
             if text:
@@ -159,7 +186,7 @@ def extract_page(url: str, html: str) -> ExtractedPage:
     title = _title_from_soup(soup, url)
     _clean_soup(soup)
     root = _select_content_root(soup)
-    blocks = _walk_blocks(root)
+    blocks = _walk_blocks(root, base_url=url)
     text, headings = _flatten_blocks(blocks)
     if not headings:
         headings = [title] if title else []

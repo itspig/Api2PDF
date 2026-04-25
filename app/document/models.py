@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-BlockKind = Literal["heading", "paragraph", "code", "table"]
+BlockKind = Literal["heading", "paragraph", "code", "table", "image"]
 
 
 @dataclass(slots=True)
@@ -31,7 +31,18 @@ class TableBlock:
     rows: list[list[str]]
 
 
-Block = HeadingBlock | ParagraphBlock | CodeBlock | TableBlock
+@dataclass(slots=True)
+class ImageBlock:
+    kind: Literal["image"]
+    src: str
+    alt: str = ""
+    # Filled by the pipeline once the image is downloaded; the exporter uses
+    # this byte payload directly so renderers don't need to do I/O.
+    data: bytes | None = None
+    mime_type: str = ""
+
+
+Block = HeadingBlock | ParagraphBlock | CodeBlock | TableBlock | ImageBlock
 
 
 @dataclass(slots=True)
