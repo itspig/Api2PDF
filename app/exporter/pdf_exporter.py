@@ -21,6 +21,13 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+
+CODE_BACKGROUND = colors.HexColor("#1e1e1e")
+CODE_HEADER_BACKGROUND = colors.HexColor("#2d2d2d")
+CODE_HEADER_BORDER = colors.HexColor("#3c3c3c")
+CODE_TEXT_COLOR = colors.HexColor("#f8f8f2")
+CODE_LANGUAGE_COLOR = colors.HexColor("#9cdcfe")
+
 from app.core.errors import PdfExportError
 from app.document.models import (
     Block,
@@ -103,6 +110,127 @@ def _escape_inline(text: str) -> str:
     return escape(text, quote=False)
 
 
+def _normalize_language_label(language: str) -> str:
+    if not language:
+        return "TEXT"
+    cleaned = language.strip()
+    if not cleaned:
+        return "TEXT"
+    aliases = {
+        "py": "Python",
+        "python3": "Python",
+        "python": "Python",
+        "js": "JavaScript",
+        "javascript": "JavaScript",
+        "ts": "TypeScript",
+        "typescript": "TypeScript",
+        "sh": "Shell",
+        "bash": "Bash",
+        "shell": "Shell",
+        "zsh": "Zsh",
+        "ps": "PowerShell",
+        "powershell": "PowerShell",
+        "ps1": "PowerShell",
+        "json": "JSON",
+        "yaml": "YAML",
+        "yml": "YAML",
+        "html": "HTML",
+        "css": "CSS",
+        "sql": "SQL",
+        "c": "C",
+        "cpp": "C++",
+        "c++": "C++",
+        "java": "Java",
+        "go": "Go",
+        "rs": "Rust",
+        "rust": "Rust",
+        "vba": "VBA",
+    }
+    return aliases.get(cleaned.lower(), cleaned[:1].upper() + cleaned[1:])
+
+
+def _build_code_language_strip(
+    language_label: str,
+    *,
+    doc_width: float,
+    code_language_style: ParagraphStyle,
+) -> Flowable:
+    paragraph = Paragraph(_escape_inline(language_label), code_language_style)
+    table = Table(
+        [[paragraph]],
+        colWidths=[doc_width],
+        hAlign="LEFT",
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), CODE_HEADER_BACKGROUND),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, CODE_HEADER_BORDER),
+                ("BOX", (0, 0), (-1, -1), 0.5, CODE_HEADER_BORDER),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]
+        )
+    )
+    return table
+
+
+def _build_code_body(
+    code_text: str,
+    *,
+    doc_width: float,
+    code_style: ParagraphStyle,
+) -> Flowable:
+    if not code_text:
+        return Spacer(1, 0)
+    return Preformatted(code_text, code_style, dedent=0)
+
+
+def _build_code_flowable(
+    block: CodeBlock,
+    *,
+    doc_width: float,
+    code_style: ParagraphStyle,
+    code_language_style: ParagraphStyle,
+) -> KeepTogether:
+    """Return a KeepTogether wrapping a small head + body so callers/tests can introspect."""
+
+    flowables = _build_code_flowables(
+        block,
+        doc_width=doc_width,
+        code_style=code_style,
+        code_language_style=code_language_style,
+    )
+    return KeepTogether(flowables)
+
+
+def _build_code_flowables(
+    block: CodeBlock,
+    *,
+    doc_width: float,
+    code_style: ParagraphStyle,
+    code_language_style: ParagraphStyle,
+) -> list[Flowable]:
+    language_label = _normalize_language_label(block.language)
+    code_text = block.text.replace("\t", "    ").rstrip()
+    header = _build_code_language_strip(
+        language_label,
+        doc_width=doc_width,
+        code_language_style=code_language_style,
+    )
+    body = _build_code_body(code_text, doc_width=doc_width, code_style=code_style)
+    # Allow the body to split across pages when it's longer than a frame.
+    return [
+        Spacer(1, 0.1 * cm),
+        KeepTogether([header, Spacer(1, 0.05 * cm)]),
+        body,
+        Spacer(1, 0.25 * cm),
+    ]
+
+
 def _build_table_flowable(block: TableBlock, doc_width: float, body_style: ParagraphStyle) -> Flowable:
     rows = [row for row in block.rows if row]
     if not rows:
@@ -169,6 +297,7 @@ def _build_block_flowables(
     doc_width: float,
     body_style: ParagraphStyle,
     code_style: ParagraphStyle,
+    code_language_style: ParagraphStyle,
     heading_styles: dict[int, ParagraphStyle],
     page_index: int,
     block_index: int,
@@ -184,7 +313,14 @@ def _build_block_flowables(
     elif isinstance(block, ParagraphBlock):
         flowables.append(Paragraph(_escape_inline(block.text), body_style))
     elif isinstance(block, CodeBlock):
-        flowables.append(KeepTogether(Preformatted(block.text, code_style)))
+        flowables.extend(
+            _build_code_flowables(
+                block,
+                doc_width=doc_width,
+                code_style=code_style,
+                code_language_style=code_language_style,
+            )
+        )
     elif isinstance(block, TableBlock):
         flowables.append(_build_table_flowable(block, doc_width=doc_width, body_style=body_style))
     return flowables
@@ -274,15 +410,25 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
             fontName=mono_font,
             fontSize=9,
             leading=12,
-            textColor=colors.HexColor("#212121"),
-            backColor=colors.HexColor("#f5f5f5"),
-            borderColor=colors.HexColor("#dddddd"),
+            textColor=CODE_TEXT_COLOR,
+            backColor=CODE_BACKGROUND,
+            borderColor=CODE_HEADER_BORDER,
             borderWidth=0.5,
-            borderPadding=6,
-            leftIndent=4,
-            rightIndent=4,
-            spaceBefore=4,
-            spaceAfter=8,
+            borderPadding=8,
+            leftIndent=0,
+            rightIndent=0,
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        code_language_style = ParagraphStyle(
+            "ApiCodeLanguage",
+            parent=styles["BodyText"],
+            fontName=mono_font,
+            fontSize=8,
+            leading=10,
+            textColor=CODE_LANGUAGE_COLOR,
+            spaceBefore=0,
+            spaceAfter=0,
         )
         heading_styles = {2: h2_style, 3: h3_style, 4: h4_style}
 
@@ -335,6 +481,7 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
                         doc_width=doc_width,
                         body_style=body_style,
                         code_style=code_style,
+                        code_language_style=code_language_style,
                         heading_styles=heading_styles,
                         page_index=index,
                         block_index=block_index,
