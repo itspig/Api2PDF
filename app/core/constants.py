@@ -42,16 +42,43 @@ DEFAULT_SKIP_EXTENSIONS = {
 }
 
 DEFAULT_SKIP_KEYWORDS = (
+    # Auth and account flows
     "login",
     "signin",
     "signup",
+    "register",
+    "logout",
+    "password",
+    "lostpassword",
+    # Site-search and filtered listings (rarely useful as docs)
     "search",
     "tag",
     "category",
+    # Static asset directories that are sometimes served as routable HTML
     "assets",
     "static",
     "download",
     "attachment",
+    # Common WordPress non-content paths that pollute BFS but never hold docs
+    "wp-login",
+    "wp-admin",
+    "wp-json",
+    "wp-content/uploads",
+    "wp-content/plugins",
+    "wp-content/themes",
+    "wp-includes",
+)
+
+
+# Query parameter names whose mere presence marks a URL as auxiliary (login
+# redirects, post-action endpoints, share dialogs, etc.). We skip URLs that
+# carry any of them.
+DEFAULT_SKIP_QUERY_KEYS = (
+    "redirect_to",
+    "action",
+    "_wpnonce",
+    "share",
+    "replytocom",
 )
 
 DOCUMENT_SELECTORS = [

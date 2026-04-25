@@ -1,8 +1,12 @@
 from pathlib import PurePosixPath
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from app.config.models import ExportConfig
-from app.core.constants import DEFAULT_SKIP_EXTENSIONS, DEFAULT_SKIP_KEYWORDS
+from app.core.constants import (
+    DEFAULT_SKIP_EXTENSIONS,
+    DEFAULT_SKIP_KEYWORDS,
+    DEFAULT_SKIP_QUERY_KEYS,
+)
 from app.parser.urls import infer_path_prefix, is_same_domain, normalize_url
 
 
@@ -20,6 +24,10 @@ def should_skip_url(url: str, config: ExportConfig, *, require_prefix: bool = Tr
         return True
     if any(keyword in lower_path for keyword in DEFAULT_SKIP_KEYWORDS):
         return True
+    if parsed.query:
+        query_keys = {key.lower() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+        if query_keys & set(DEFAULT_SKIP_QUERY_KEYS):
+            return True
     if require_prefix:
         prefix = infer_path_prefix(config.url).lower()
         candidate = lower_path if lower_path.endswith("/") else lower_path + "/"
