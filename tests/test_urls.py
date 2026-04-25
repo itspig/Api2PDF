@@ -21,5 +21,12 @@ def test_same_domain() -> None:
 
 
 def test_infer_path_prefix() -> None:
-    assert infer_path_prefix("http://docs.thinktrader.net/pages/040ff7/") == "/pages/040ff7/"
+    # File-style URL: prefix is the file's directory.
+    assert infer_path_prefix("http://docs.thinktrader.net/pages/040ff7.html") == "/pages/"
+    # Non-directory path: prefix is the inferred parent directory.
     assert infer_path_prefix("http://docs.thinktrader.net/pages/040ff7") == "/pages/"
+    # Directory-style URL: step up so siblings under the parent are discovered.
+    assert infer_path_prefix("http://docs.thinktrader.net/pages/040ff7/") == "/pages/"
+    # First-level directory: cannot step above root, return itself.
+    assert infer_path_prefix("https://example.com/docs/") == "/docs/"
+    assert infer_path_prefix("https://example.com/") == "/"

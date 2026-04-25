@@ -32,9 +32,29 @@ def is_same_domain(base: str, target: str) -> bool:
 
 
 def infer_path_prefix(url: str) -> str:
+    """Infer the crawl prefix for ``url``.
+
+    Examples:
+      /foo/bar.html  -> /foo/
+      /foo/bar/      -> /foo/        (siblings under /foo/ are part of the doc set)
+      /foo/          -> /foo/        (already at the section root)
+      /              -> /
+
+    Stepping up from a directory-style URL lets us discover sibling chapters
+    such as /khQuant/chapter1/, /khQuant/chapter2/ when the user passes one of
+    them as the entry URL.
+    """
+
     path = urlparse(url).path or "/"
+    if path == "/":
+        return "/"
     if path.endswith("/"):
-        return path
+        # Directory-style URL: step up to the parent so siblings are reachable,
+        # but never go above the site root.
+        parent = str(PurePosixPath(path).parent)
+        if parent in (".", "/"):
+            return path
+        return parent.rstrip("/") + "/"
     parent = str(PurePosixPath(path).parent)
     if parent == ".":
         return "/"

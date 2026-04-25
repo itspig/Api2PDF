@@ -24,14 +24,16 @@ def test_deduplicate_and_filter() -> None:
     assert deduplicate_and_filter(urls, config) == ["https://example.com/docs/a", "https://example.com/docs/b"]
 
 
-def test_directory_style_start_url_not_skipped() -> None:
-    """Regression: a URL like /khQuant/tutorial/ becomes /khQuant/tutorial after
-    normalize_url, but it must still be considered inside the inferred prefix."""
+def test_directory_style_start_url_includes_siblings() -> None:
+    """Regression: when the entry URL is a directory like /khQuant/chapter1/,
+    siblings under /khQuant/ must also be considered crawlable so multi-chapter
+    docs sites are exported in full."""
 
-    config = ExportConfig(url="https://khsci.com/khQuant/tutorial/")
+    config = ExportConfig(url="https://khsci.com/khQuant/chapter1/")
+    assert not should_skip_url("https://khsci.com/khQuant/chapter1/", config)
+    assert not should_skip_url("https://khsci.com/khQuant/chapter1", config)
+    # Sibling chapters under /khQuant/ are part of the doc set
+    assert not should_skip_url("https://khsci.com/khQuant/chapter2/", config)
     assert not should_skip_url("https://khsci.com/khQuant/tutorial/", config)
-    assert not should_skip_url("https://khsci.com/khQuant/tutorial", config)
-    # And paths under that directory still match
-    assert not should_skip_url("https://khsci.com/khQuant/tutorial/getting-started.html", config)
-    # Sibling directory is rejected because it does not share the prefix
-    assert should_skip_url("https://khsci.com/khQuant/api/", config)
+    # A path outside the parent directory (different section) is rejected
+    assert should_skip_url("https://khsci.com/other/page", config)
