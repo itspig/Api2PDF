@@ -1,6 +1,6 @@
 # api2pdf
 
-`api2pdf` is a Windows-friendly Python CLI that exports API documentation sites into a single offline PDF.
+`api2pdf` is a Windows-friendly Python CLI that exports API documentation sites into a single offline PDF. **1.0** is the first stable release; the data model, CLI flags, and PDF output structure follow semver from this version onward.
 
 ## Features
 
