@@ -20,8 +20,11 @@ def should_skip_url(url: str, config: ExportConfig, *, require_prefix: bool = Tr
         return True
     if any(keyword in lower_path for keyword in DEFAULT_SKIP_KEYWORDS):
         return True
-    if require_prefix and not lower_path.startswith(infer_path_prefix(config.url).lower()):
-        return True
+    if require_prefix:
+        prefix = infer_path_prefix(config.url).lower()
+        candidate = lower_path if lower_path.endswith("/") else lower_path + "/"
+        if not (lower_path.startswith(prefix) or candidate == prefix):
+            return True
     if config.include and not any(token in normalized for token in config.include):
         return True
     if config.exclude and any(token in normalized for token in config.exclude):

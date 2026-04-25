@@ -5,8 +5,13 @@ def test_remove_fragment() -> None:
     assert remove_fragment("https://example.com/a#b") == "https://example.com/a"
 
 
-def test_normalize_url_removes_tracking_and_trailing_slash() -> None:
+def test_normalize_url_removes_tracking_and_keeps_trailing_slash() -> None:
     url = normalize_url("HTTPS://Example.COM/a/b/?utm_source=x&keep=1#section")
+    assert url == "https://example.com/a/b/?keep=1"
+
+
+def test_normalize_url_keeps_non_directory_path() -> None:
+    url = normalize_url("HTTPS://Example.COM/a/b?keep=1")
     assert url == "https://example.com/a/b?keep=1"
 
 

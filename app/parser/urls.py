@@ -16,8 +16,8 @@ def normalize_url(url: str, base_url: str | None = None) -> str:
     scheme = parsed.scheme.lower() or "https"
     netloc = parsed.netloc.lower()
     path = parsed.path or "/"
-    if path != "/" and path.endswith("/"):
-        path = path.rstrip("/")
+    # Preserve trailing slash on directory-style URLs - some hosts hang on the
+    # bare path, and the original semantics (directory vs. file) matter.
     query_pairs = []
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
         if key in TRACKING_QUERY_KEYS or key.startswith(TRACKING_QUERY_PREFIXES):
