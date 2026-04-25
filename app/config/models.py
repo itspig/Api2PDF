@@ -12,6 +12,8 @@ class ExportConfig:
     include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
     no_sitemap: bool = False
+    add_column_title: bool = False
+    no_images: bool = False
 
     def validate(self) -> None:
         if self.max_pages < 1:

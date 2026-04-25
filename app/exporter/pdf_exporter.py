@@ -1,4 +1,5 @@
 from html import escape
+from io import BytesIO
 from pathlib import Path
 import uuid
 
@@ -11,6 +12,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     Flowable,
+    Image,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -35,6 +37,7 @@ from app.document.models import (
     CompiledDocument,
     ExtractedPage,
     HeadingBlock,
+    ImageBlock,
     ParagraphBlock,
     TableBlock,
 )
@@ -399,9 +402,11 @@ def _build_block_flowables(
     block: Block,
     *,
     doc_width: float,
+    doc_height: float,
     body_style: ParagraphStyle,
     code_style: ParagraphStyle,
     code_language_style: ParagraphStyle,
+    meta_style: ParagraphStyle,
     heading_styles: dict[int, ParagraphStyle],
     page_index: int,
     block_index: int,
@@ -427,6 +432,57 @@ def _build_block_flowables(
         )
     elif isinstance(block, TableBlock):
         flowables.append(_build_table_flowable(block, doc_width=doc_width, body_style=body_style))
+    elif isinstance(block, ImageBlock):
+        flowables.extend(
+            _build_image_flowables(
+                block,
+                doc_width=doc_width,
+                doc_height=doc_height,
+                body_style=body_style,
+                meta_style=meta_style,
+            )
+        )
+    return flowables
+
+
+def _build_image_flowables(
+    block: ImageBlock,
+    *,
+    doc_width: float,
+    doc_height: float,
+    body_style: ParagraphStyle,
+    meta_style: ParagraphStyle,
+) -> list[Flowable]:
+    if not block.data:
+        # No payload (download failed or --no-images): show alt-text fallback
+        # so the reader knows an image was present at this position.
+        if block.alt:
+            return [
+                Paragraph(_escape_inline(f"[image: {block.alt}]"), meta_style),
+                Spacer(1, 0.2 * cm),
+            ]
+        return []
+    try:
+        buffer = BytesIO(block.data)
+        image = Image(buffer)
+        max_width = doc_width
+        # Cap height so a single image cannot consume an entire page; reportlab
+        # renders the leftover content on the next page.
+        max_height = max(2 * cm, doc_height * 0.7)
+        image._restrictSize(max_width, max_height)
+        image.hAlign = "CENTER"
+    except Exception:
+        if block.alt:
+            return [
+                Paragraph(_escape_inline(f"[image: {block.alt}]"), meta_style),
+                Spacer(1, 0.2 * cm),
+            ]
+        return []
+
+    flowables: list[Flowable] = [Spacer(1, 0.2 * cm), image]
+    if block.alt:
+        flowables.append(Paragraph(_escape_inline(block.alt), meta_style))
+    flowables.append(Spacer(1, 0.3 * cm))
     return flowables
 
 
@@ -541,6 +597,7 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
             bottomMargin=1.6 * cm,
         )
         doc_width = doc.width
+        doc_height = doc.height
 
         story: list[Flowable] = [
             Paragraph(_escape_inline(document.site_title), title_style),
@@ -579,9 +636,11 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
                     _build_block_flowables(
                         block,
                         doc_width=doc_width,
+                        doc_height=doc_height,
                         body_style=body_style,
                         code_style=code_style,
                         code_language_style=code_language_style,
+                        meta_style=meta_style,
                         heading_styles=heading_styles,
                         page_index=index,
                         block_index=block_index,

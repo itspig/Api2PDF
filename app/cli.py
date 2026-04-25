@@ -21,6 +21,17 @@ def export(
     include: Annotated[Optional[List[str]], typer.Option("--include", help="Only include URLs containing this token")] = None,
     exclude: Annotated[Optional[List[str]], typer.Option("--exclude", help="Exclude URLs containing this token")] = None,
     no_sitemap: Annotated[bool, typer.Option("--no-sitemap", help="Disable sitemap discovery")] = False,
+    add_column_title: Annotated[
+        bool,
+        typer.Option(
+            "--add-column-title",
+            help="Prepend the inferred section path to each page title (e.g. '1. 1.1 Intro').",
+        ),
+    ] = False,
+    no_images: Annotated[
+        bool,
+        typer.Option("--no-images", help="Disable embedding inline page images into the PDF."),
+    ] = False,
     debug: Annotated[bool, typer.Option("--debug", help="Enable verbose debug output")] = False,
 ) -> None:
     config = ExportConfig(
@@ -32,6 +43,8 @@ def export(
         include=include or [],
         exclude=exclude or [],
         no_sitemap=no_sitemap,
+        add_column_title=add_column_title,
+        no_images=no_images,
         debug=debug,
     )
     try:

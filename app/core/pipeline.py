@@ -1,4 +1,4 @@
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin, urlparse
 import re
 import sys
 from html.parser import HTMLParser
@@ -11,6 +11,7 @@ from app.document.models import (
     CodeBlock,
     ExtractedPage,
     HeadingBlock,
+    ImageBlock,
     ParagraphBlock,
     TableBlock,
 )
@@ -35,9 +36,10 @@ _SKIP_TAGS = {"script", "style", "nav", "footer", "aside", "noscript", "svg", "f
 
 
 class _StructuredExtractor(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = "") -> None:
         super().__init__(convert_charrefs=True)
         self.title = ""
+        self.base_url = base_url
         self.blocks: list[Block] = []
         self._title_buffer: list[str] = []
         self._in_title = False
@@ -55,6 +57,12 @@ class _StructuredExtractor(HTMLParser):
     def _attr_class(self, attrs: list[tuple[str, str | None]]) -> str:
         for key, value in attrs:
             if key.lower() == "class" and value:
+                return value
+        return ""
+
+    def _attr(self, attrs: list[tuple[str, str | None]], name: str) -> str:
+        for key, value in attrs:
+            if key.lower() == name and value:
                 return value
         return ""
 
@@ -91,6 +99,20 @@ class _StructuredExtractor(HTMLParser):
             return
         if lower in {"th", "td"} and self._row_stack:
             self._cell_stack.append([])
+            return
+        if lower == "img":
+            src = (
+                self._attr(attrs, "src")
+                or self._attr(attrs, "data-src")
+                or self._attr(attrs, "data-original")
+            )
+            if not src or src.lower().startswith("data:"):
+                return
+            resolved = urljoin(self.base_url, src) if self.base_url else src
+            if resolved.lower().endswith(".svg"):
+                return
+            alt = self._attr(attrs, "alt")
+            self.blocks.append(ImageBlock(kind="image", src=resolved, alt=alt))
             return
         if lower in _PARAGRAPH_TAGS:
             self._paragraph_stack.append([])
@@ -184,11 +206,14 @@ def _flatten_blocks(blocks: list[Block]) -> tuple[str, list[str]]:
         elif block.kind == "table":
             for row in block.rows:
                 text_parts.append(" | ".join(row))
+        elif block.kind == "image":
+            if block.alt:
+                text_parts.append(f"[image: {block.alt}]")
     return "\n".join(text_parts), headings
 
 
 def _extract_page_stdlib(url: str, html: str) -> ExtractedPage:
-    parser = _StructuredExtractor()
+    parser = _StructuredExtractor(base_url=url)
     parser.feed(html)
     blocks = parser.blocks
     text, headings = _flatten_blocks(blocks)
@@ -319,6 +344,36 @@ def run_export(config: ExportConfig) -> str:
 
     if not extracted_pages:
         raise ExtractionError("No readable content extracted from any page.")
+
+    # Cross-page polish: strip site-name suffix from titles and (optionally)
+    # add a section path; remove blocks that repeat across the majority of
+    # pages (nav, footer, copyright, risk disclosures, etc.).
+    from app.document.titles import decorate_titles
+    from app.document.dedup import deduplicate_repeating_blocks
+
+    decorate_titles(extracted_pages, add_column_title=config.add_column_title)
+    removed = deduplicate_repeating_blocks(extracted_pages)
+    if config.debug:
+        print(f"dedup: removed {removed} repeating blocks", flush=True)
+
+    # Best-effort: download inline images so the PDF preserves figures from
+    # the source pages. ``--no-images`` short-circuits this entirely.
+    if not config.no_images:
+        from app.net.image_fetcher import fetch_images
+
+        all_image_blocks = (
+            block
+            for page in extracted_pages
+            for block in page.blocks
+            if isinstance(block, ImageBlock)
+        )
+        populated = fetch_images(
+            all_image_blocks, timeout=config.timeout, debug=config.debug
+        )
+        if config.debug:
+            print(f"images: embedded {populated} image(s)", flush=True)
+    elif config.debug:
+        print("images: skipped (--no-images)", flush=True)
 
     document = compile_document(config.url, extracted_pages)
     from app.exporter.pdf_exporter import export_pdf
