@@ -9,7 +9,7 @@
 - Filters duplicate URLs, fragments, static assets, auth/search/tag pages, and optional include/exclude patterns.
 - Extracts readable documentation text using common docs selectors, `trafilatura`, then cleaned body text.
 - The packaged `.exe` uses a stdlib HTML text extractor fallback for better PyInstaller reliability.
-- Generates a PDF with title page, contents list, page URLs, body text, and page numbers.
+- Generates a structured PDF with title page, clickable contents list, per-page PDF bookmarks (with nested headings), formatted code blocks, and tables.
 
 ## Install for development
 
