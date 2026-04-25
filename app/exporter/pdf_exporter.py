@@ -110,43 +110,47 @@ def _escape_inline(text: str) -> str:
     return escape(text, quote=False)
 
 
+_LANGUAGE_ALIASES = {
+    "py": "Python",
+    "python3": "Python",
+    "python": "Python",
+    "js": "JavaScript",
+    "javascript": "JavaScript",
+    "ts": "TypeScript",
+    "typescript": "TypeScript",
+    "sh": "Shell",
+    "bash": "Bash",
+    "shell": "Shell",
+    "zsh": "Zsh",
+    "ps": "PowerShell",
+    "powershell": "PowerShell",
+    "ps1": "PowerShell",
+    "json": "JSON",
+    "yaml": "YAML",
+    "yml": "YAML",
+    "html": "HTML",
+    "css": "CSS",
+    "sql": "SQL",
+    "c": "C",
+    "cpp": "C++",
+    "c++": "C++",
+    "java": "Java",
+    "go": "Go",
+    "rs": "Rust",
+    "rust": "Rust",
+    "vba": "VBA",
+}
+
+
 def _normalize_language_label(language: str) -> str:
+    """Return a friendly language label, or empty string when unknown."""
+
     if not language:
-        return "TEXT"
+        return ""
     cleaned = language.strip()
     if not cleaned:
-        return "TEXT"
-    aliases = {
-        "py": "Python",
-        "python3": "Python",
-        "python": "Python",
-        "js": "JavaScript",
-        "javascript": "JavaScript",
-        "ts": "TypeScript",
-        "typescript": "TypeScript",
-        "sh": "Shell",
-        "bash": "Bash",
-        "shell": "Shell",
-        "zsh": "Zsh",
-        "ps": "PowerShell",
-        "powershell": "PowerShell",
-        "ps1": "PowerShell",
-        "json": "JSON",
-        "yaml": "YAML",
-        "yml": "YAML",
-        "html": "HTML",
-        "css": "CSS",
-        "sql": "SQL",
-        "c": "C",
-        "cpp": "C++",
-        "c++": "C++",
-        "java": "Java",
-        "go": "Go",
-        "rs": "Rust",
-        "rust": "Rust",
-        "vba": "VBA",
-    }
-    return aliases.get(cleaned.lower(), cleaned[:1].upper() + cleaned[1:])
+        return ""
+    return _LANGUAGE_ALIASES.get(cleaned.lower(), cleaned[:1].upper() + cleaned[1:])
 
 
 def _build_code_language_strip(
@@ -178,6 +182,58 @@ def _build_code_language_strip(
     return table
 
 
+class _DarkCodeBlock(Flowable):
+    """Flowable that paints a solid dark background behind a Preformatted body.
+
+    ReportLab's `Preformatted` only paints the `backColor` directly behind text
+    glyphs, leaving padding and trailing whitespace white. We wrap the body in a
+    Flowable that draws a single filled rectangle covering the full block area,
+    then renders the Preformatted on top. We delegate ``wrap`` and ``split`` to
+    the wrapped flowable so very long code blocks still page-break naturally.
+    """
+
+    PADDING_X = 8
+    PADDING_Y = 6
+
+    def __init__(self, body: Flowable, *, doc_width: float) -> None:
+        super().__init__()
+        self.body = body
+        self.doc_width = doc_width
+        self.width = doc_width
+        self.height = 0
+
+    # Allow ReportLab to call wrap repeatedly during layout
+    def wrap(self, available_width, available_height):
+        inner_width = self.doc_width - 2 * self.PADDING_X
+        inner_height_available = available_height - 2 * self.PADDING_Y
+        body_w, body_h = self.body.wrap(inner_width, max(inner_height_available, 0))
+        self.width = self.doc_width
+        self.height = body_h + 2 * self.PADDING_Y
+        return self.width, self.height
+
+    def split(self, available_width, available_height):
+        inner_height = max(available_height - 2 * self.PADDING_Y, 0)
+        if inner_height <= 0:
+            return []
+        parts = self.body.split(self.doc_width - 2 * self.PADDING_X, inner_height)
+        if not parts:
+            return []
+        wrapped: list[Flowable] = []
+        for part in parts:
+            wrapped.append(_DarkCodeBlock(part, doc_width=self.doc_width))
+        return wrapped
+
+    def draw(self) -> None:
+        canvas = self.canv
+        canvas.saveState()
+        canvas.setFillColor(CODE_BACKGROUND)
+        canvas.setStrokeColor(CODE_HEADER_BORDER)
+        canvas.setLineWidth(0.5)
+        canvas.rect(0, 0, self.width, self.height, stroke=1, fill=1)
+        canvas.restoreState()
+        self.body.drawOn(canvas, self.PADDING_X, self.PADDING_Y)
+
+
 def _build_code_body(
     code_text: str,
     *,
@@ -186,7 +242,8 @@ def _build_code_body(
 ) -> Flowable:
     if not code_text:
         return Spacer(1, 0)
-    return Preformatted(code_text, code_style, dedent=0)
+    body = Preformatted(code_text, code_style, dedent=0)
+    return _DarkCodeBlock(body, doc_width=doc_width)
 
 
 def _build_code_flowable(
@@ -216,19 +273,21 @@ def _build_code_flowables(
 ) -> list[Flowable]:
     language_label = _normalize_language_label(block.language)
     code_text = block.text.replace("\t", "    ").rstrip()
-    header = _build_code_language_strip(
-        language_label,
-        doc_width=doc_width,
-        code_language_style=code_language_style,
-    )
     body = _build_code_body(code_text, doc_width=doc_width, code_style=code_style)
-    # Allow the body to split across pages when it's longer than a frame.
-    return [
-        Spacer(1, 0.1 * cm),
-        KeepTogether([header, Spacer(1, 0.05 * cm)]),
-        body,
-        Spacer(1, 0.25 * cm),
-    ]
+
+    flowables: list[Flowable] = [Spacer(1, 0.1 * cm)]
+    if language_label:
+        header = _build_code_language_strip(
+            language_label,
+            doc_width=doc_width,
+            code_language_style=code_language_style,
+        )
+        # Keep the language strip glued to the first body line; long bodies
+        # still split naturally because only the header pair is held together.
+        flowables.append(KeepTogether([header, Spacer(1, 0.05 * cm)]))
+    flowables.append(body)
+    flowables.append(Spacer(1, 0.25 * cm))
+    return flowables
 
 
 def _build_table_flowable(block: TableBlock, doc_width: float, body_style: ParagraphStyle) -> Flowable:
@@ -411,10 +470,6 @@ def export_pdf(document: CompiledDocument, output_path: str) -> None:
             fontSize=9,
             leading=12,
             textColor=CODE_TEXT_COLOR,
-            backColor=CODE_BACKGROUND,
-            borderColor=CODE_HEADER_BORDER,
-            borderWidth=0.5,
-            borderPadding=8,
             leftIndent=0,
             rightIndent=0,
             spaceBefore=0,

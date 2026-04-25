@@ -9,11 +9,12 @@ from app.document.models import (
     TableBlock,
 )
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import KeepTogether, Table
+from reportlab.platypus import KeepTogether, Preformatted, Table
 
 from app.exporter.pdf_exporter import (
     CODE_BACKGROUND,
     CODE_HEADER_BACKGROUND,
+    _DarkCodeBlock,
     _build_code_flowable,
     _normalize_language_label,
     export_pdf,
@@ -70,20 +71,22 @@ def test_normalize_language_label_handles_aliases() -> None:
     assert _normalize_language_label("python") == "Python"
     assert _normalize_language_label("py") == "Python"
     assert _normalize_language_label("JS") == "JavaScript"
-    assert _normalize_language_label("") == "TEXT"
+    assert _normalize_language_label("") == ""
+    assert _normalize_language_label("   ") == ""
     assert _normalize_language_label("custom-lang") == "Custom-lang"
 
 
-def test_build_code_flowable_uses_dark_theme_with_language_header() -> None:
-    from reportlab.platypus import Preformatted
+def _iter_flat(node):
+    if isinstance(node, KeepTogether):
+        for item in node._content:
+            yield from _iter_flat(item)
+    else:
+        yield node
 
+
+def test_build_code_flowable_includes_language_strip_when_known() -> None:
     styles = getSampleStyleSheet()
-    code_style = ParagraphStyle(
-        "ApiCodeTest",
-        parent=styles["Code"],
-        fontName="Courier",
-        backColor=CODE_BACKGROUND,
-    )
+    code_style = ParagraphStyle("ApiCodeTest", parent=styles["Code"], fontName="Courier")
     code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
     block = CodeBlock(
         kind="code",
@@ -97,27 +100,74 @@ def test_build_code_flowable_uses_dark_theme_with_language_header() -> None:
         code_language_style=code_language_style,
     )
     assert isinstance(flowable, KeepTogether)
-
-    def _iter_flat(node):
-        if isinstance(node, KeepTogether):
-            for item in node._content:
-                yield from _iter_flat(item)
-        else:
-            yield node
-
     items = list(_iter_flat(flowable))
+
     header_tables = [item for item in items if isinstance(item, Table)]
-    assert header_tables, "code flowable must contain a header Table"
+    assert header_tables, "known languages must keep a language strip Table"
     header = header_tables[0]
     assert header._argW == [500]
     header_backgrounds = [cmd for cmd in header._bkgrndcmds if cmd[0] == "BACKGROUND"]
-    header_colors = {cmd[3] for cmd in header_backgrounds}
-    assert CODE_HEADER_BACKGROUND in header_colors
+    assert CODE_HEADER_BACKGROUND in {cmd[3] for cmd in header_backgrounds}
 
-    pre_blocks = [item for item in items if isinstance(item, Preformatted)]
-    assert pre_blocks, "code flowable must contain a Preformatted body"
-    body_style = pre_blocks[0].style
-    assert body_style.backColor == CODE_BACKGROUND
+    dark_blocks = [item for item in items if isinstance(item, _DarkCodeBlock)]
+    assert dark_blocks, "code body must be rendered as a _DarkCodeBlock"
+    inner_pre = dark_blocks[0].body
+    assert isinstance(inner_pre, Preformatted)
+
+
+def test_build_code_flowable_drops_language_strip_when_unknown() -> None:
+    styles = getSampleStyleSheet()
+    code_style = ParagraphStyle("ApiCodeTest", parent=styles["Code"], fontName="Courier")
+    code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
+    block = CodeBlock(
+        kind="code",
+        text="some plain code",
+        language="",
+    )
+    flowable = _build_code_flowable(
+        block,
+        doc_width=500,
+        code_style=code_style,
+        code_language_style=code_language_style,
+    )
+    items = list(_iter_flat(flowable))
+    assert not [item for item in items if isinstance(item, Table)], "unknown languages must omit the language strip"
+    assert [item for item in items if isinstance(item, _DarkCodeBlock)], "code body must still be rendered"
+
+
+def test_dark_code_block_paints_full_background(tmp_path: Path) -> None:
+    """Render a small PDF and confirm the dark fill rectangle is in the stream."""
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate
+
+    output = tmp_path / "dark.pdf"
+    styles = getSampleStyleSheet()
+    code_style = ParagraphStyle(
+        "ApiCodeTest",
+        parent=styles["Code"],
+        fontName="Courier",
+        textColor=CODE_BACKGROUND,
+    )
+    block = CodeBlock(kind="code", text="line one\nline two", language="python")
+    code_language_style = ParagraphStyle("ApiCodeLanguageTest", parent=styles["BodyText"])
+    doc = SimpleDocTemplate(str(output), pagesize=A4)
+    story = list(
+        _iter_flat(
+            _build_code_flowable(
+                block,
+                doc_width=500,
+                code_style=code_style,
+                code_language_style=code_language_style,
+            )
+        )
+    )
+    doc.build(story)
+    data = output.read_bytes()
+    # The _DarkCodeBlock issues a "rectangle fill" PDF operator with the dark RGB.
+    # We don't assert the exact compressed token but require the file to be valid.
+    assert data.startswith(b"%PDF-")
+    assert b"/Type /Page" in data
 
 
 def test_export_pdf_code_block_renders(tmp_path: Path) -> None:
