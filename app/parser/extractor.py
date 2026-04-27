@@ -17,6 +17,18 @@ HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 BLOCK_LEVEL_TAGS = {"p", "li", "blockquote", "dt", "dd"}
 SKIP_TAGS = {"script", "style", "nav", "footer", "aside", "noscript", "svg", "form", "header"}
 
+# CSS class names on known floating ad/widget bars that we always remove.
+_AD_CLASS_NAMES = {"toFixedCopy"}
+# Image alt texts whose content is an advertisement or support widget, not
+# documentation.  Matching is by exact alt-text value so we never accidentally
+# remove a legitimate illustrative image.
+_AD_IMAGE_ALT_VALUES = {
+    "微信扫码联系客服",
+    "智能助手",
+    "分享链接",
+    "点击联系客服",
+}
+
 
 def _make_soup(html: str):
     from bs4 import BeautifulSoup
@@ -36,6 +48,35 @@ def _title_from_soup(soup, url: str) -> str:
 def _clean_soup(soup) -> None:
     for tag in soup.find_all(list(SKIP_TAGS)):
         tag.decompose()
+    _remove_ads(soup)
+
+
+def _remove_ads(soup) -> None:
+    from bs4 import Tag
+
+    # Remove floating support/feedback/ads containers by class name.
+    for tag in soup.find_all(True):
+        if not isinstance(tag, Tag):
+            continue
+        if not getattr(tag, "attrs", None):
+            continue
+        tag_classes: set[str] = set()
+        raw = tag.get("class")
+        if isinstance(raw, list):
+            tag_classes = {c for c in raw if c}
+        elif isinstance(raw, str):
+            tag_classes = {c for c in raw.split() if c}
+        if tag_classes & _AD_CLASS_NAMES:
+            tag.decompose()
+            continue
+
+    # Remove advertising images matched exactly by alt text.
+    for img in soup.find_all("img"):
+        if not isinstance(img, Tag):
+            continue
+        alt = (img.get("alt") or "").strip()
+        if alt in _AD_IMAGE_ALT_VALUES:
+            img.decompose()
 
 
 def _select_content_root(soup):
