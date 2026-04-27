@@ -9,6 +9,57 @@ from app.core.constants import (
 )
 from app.parser.urls import infer_path_prefix, is_same_domain, normalize_url
 
+# Site-specific path prefixes that are ALWAYS allowed to be followed by the
+# BFS even when the inferred crawl prefix would normally exclude them. This
+# prevents a deep BFS from wandering into forum / admin / blog sections on
+# documentation-heavy sites like khsci.com where the homepage links to
+# everything at once.
+_FOLLOW_PREFIXES_BY_HOST: dict[str, list[str]] = {
+    "khsci.com": [
+        "/khQuant/chapter",
+        "/khQuant/tutor",
+        "/khQuant/cli",
+        "/khQuant/custind",
+        "/khQuant/t0",
+        "/khQuant/log",
+        "/khQuant/qa",
+        "/khQuant/prompt",
+        "/khQuant/tutorial/",
+        "/khQuant/3-3-",
+    ],
+}
+
+
+def should_follow_link(url: str, config: ExportConfig) -> bool:
+    """Decide whether the BFS crawler should enqueue ``url`` at depth >= 1.
+
+    This is intentionally *more restrictive* than ``should_skip_url`` for
+    site-specific domains: even though ``/khQuant/forum/`` is under the
+    inferred crawl prefix, the BFS should not follow it because it leads to
+    infinite forum threads.  The function returns ``True`` for generic hosts
+    where no site-specific rules apply.
+    """
+
+    normalized = normalize_url(url, config.url)
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not is_same_domain(config.url, normalized):
+        return False
+
+    host = parsed.netloc.lower().split(":")[0]
+    prefixes = _FOLLOW_PREFIXES_BY_HOST.get(host)
+    if not prefixes:
+        # Generic host: apply the normal skip logic only.
+        return not should_skip_url(normalized, config)
+
+    lower_path = parsed.path.lower()
+    for prefix in prefixes:
+        if lower_path.startswith(prefix.lower()):
+            return True
+    # Reject paths that don't match any allow-listed prefix on this host.
+    return False
+
 
 def should_skip_url(url: str, config: ExportConfig, *, require_prefix: bool = True) -> bool:
     normalized = normalize_url(url, config.url)

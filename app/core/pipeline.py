@@ -33,6 +33,8 @@ def create_client(timeout: int):
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _PARAGRAPH_TAGS = {"p", "li", "blockquote", "dt", "dd"}
 _SKIP_TAGS = {"script", "style", "nav", "footer", "aside", "noscript", "svg", "form", "header"}
+_AD_CLASS_NAMES = {"toFixedCopy"}
+_AD_IMAGE_ALTS = {"微信扫码联系客服", "智能助手", "分享链接", "点击联系客服"}
 
 
 class _StructuredExtractor(HTMLParser):
@@ -44,6 +46,7 @@ class _StructuredExtractor(HTMLParser):
         self._title_buffer: list[str] = []
         self._in_title = False
         self._skip_depth = 0
+        self._ad_skip_depth = 0
 
         self._heading_stack: list[tuple[int, list[str]]] = []
         self._paragraph_stack: list[list[str]] = []
@@ -66,6 +69,9 @@ class _StructuredExtractor(HTMLParser):
                 return value
         return ""
 
+    def _is_skipping(self) -> bool:
+        return bool(self._skip_depth or self._ad_skip_depth)
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         lower = tag.lower()
         if lower == "title":
@@ -74,7 +80,16 @@ class _StructuredExtractor(HTMLParser):
         if lower in _SKIP_TAGS:
             self._skip_depth += 1
             return
-        if self._skip_depth:
+        if self._is_skipping():
+            raw_class = self._attr_class(attrs)
+            classes = {c for c in raw_class.split() if c} if raw_class else set()
+            if classes & _AD_CLASS_NAMES:
+                self._ad_skip_depth += 1
+            return
+        raw_class = self._attr_class(attrs)
+        classes = {c for c in raw_class.split() if c} if raw_class else set()
+        if classes & _AD_CLASS_NAMES:
+            self._ad_skip_depth += 1
             return
 
         if lower in _HEADING_TAGS:
@@ -85,8 +100,8 @@ class _StructuredExtractor(HTMLParser):
             self._pre_language = ""
             return
         if lower == "code" and self._pre_stack:
-            classes = self._attr_class(attrs).split()
-            for cls in classes:
+            classes2 = raw_class.split() if raw_class else []
+            for cls in classes2:
                 if cls.startswith("language-"):
                     self._pre_language = cls[len("language-") :]
                     break
@@ -112,6 +127,8 @@ class _StructuredExtractor(HTMLParser):
             if resolved.lower().endswith(".svg"):
                 return
             alt = self._attr(attrs, "alt")
+            if alt.strip() in _AD_IMAGE_ALTS:
+                return
             self.blocks.append(ImageBlock(src=resolved, alt=alt))
             return
         if lower in _PARAGRAPH_TAGS:
@@ -135,7 +152,10 @@ class _StructuredExtractor(HTMLParser):
         if lower in _SKIP_TAGS and self._skip_depth:
             self._skip_depth -= 1
             return
-        if self._skip_depth:
+        if self._ad_skip_depth and lower in {"div", "span", "section", "a", "button"}:
+            self._ad_skip_depth = max(0, self._ad_skip_depth - 1)
+            return
+        if self._is_skipping():
             return
 
         if lower in _HEADING_TAGS and self._heading_stack:
@@ -251,7 +271,7 @@ def _extract_links_stdlib(html: str) -> list[str]:
 
 def _crawl_site_stdlib(start_url: str, config: ExportConfig, client) -> list[str]:
     from app.net.fetcher import fetch
-    from app.parser.filters import should_skip_url
+    from app.parser.filters import should_follow_link, should_skip_url
     from app.parser.urls import normalize_url
 
     start = normalize_url(start_url)
@@ -282,7 +302,7 @@ def _crawl_site_stdlib(start_url: str, config: ExportConfig, client) -> list[str
             continue
         for link in _extract_links_stdlib(result.text):
             next_url = normalize_url(urljoin(result.final_url, link), result.final_url)
-            if next_url not in seen and not should_skip_url(next_url, config):
+            if next_url not in seen and not should_skip_url(next_url, config) and should_follow_link(next_url, config):
                 queue.append((next_url, depth + 1))
 
     return ordered
